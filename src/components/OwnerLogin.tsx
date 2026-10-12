@@ -176,7 +176,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
 
     const cleanPrimaryId = primaryOwnerId.trim();
     if (!cleanPrimaryId) {
-      setError('Primary Owner ID is required. Please enter the valid Primary Owner ID to sign in.');
+      setError('Please enter your Registered Gmail or Primary Owner ID to sign in.');
       return;
     }
 
@@ -219,10 +219,22 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
       try {
         const response = await apiForgotPassword(clean);
         setStatusMessage(response.message);
+        if (response.devOtp) {
+          sessionStorage.setItem(
+            'chaiden_pwd_reset_otp',
+            JSON.stringify({
+              email: clean,
+              code: response.devOtp,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 10 * 60 * 1000,
+              attempts: 0,
+            })
+          );
+        }
       } catch {
         // Fallback to client-side service if backend unavailable
-        await requestPasswordResetOtp(clean);
-        setStatusMessage(`A 4-digit verification code has been dispatched to your Gmail (${clean}).`);
+        const res = await requestPasswordResetOtp(clean);
+        setStatusMessage(res.message);
       }
 
       // Also trigger Firebase Auth password reset email directly
@@ -306,9 +318,21 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
       try {
         const res = await apiResendResetOtp(recoveryEmail);
         setStatusMessage(res.message);
+        if (res.devOtp) {
+          sessionStorage.setItem(
+            'chaiden_pwd_reset_otp',
+            JSON.stringify({
+              email: recoveryEmail,
+              code: res.devOtp,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + 10 * 60 * 1000,
+              attempts: 0,
+            })
+          );
+        }
       } catch {
-        await requestPasswordResetOtp(recoveryEmail);
-        setStatusMessage(`A new verification code has been sent to your Gmail (${recoveryEmail}).`);
+        const res = await requestPasswordResetOtp(recoveryEmail);
+        setStatusMessage(res.message);
       }
 
       setEnteredOtp('');
@@ -464,11 +488,11 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
         {/* ======================================================== */}
         {viewMode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* Primary Owner ID (Required for all roles) */}
+            {/* Primary Owner ID or Registered Gmail */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-outfit text-[#dfb76c] uppercase tracking-wider font-semibold">
-                  Primary Owner ID
+                  Registered Owner Gmail or Owner ID
                 </label>
               </div>
               <div className="relative">
@@ -478,7 +502,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
                   required
                   value={primaryOwnerId}
                   onChange={(e) => setPrimaryOwnerId(e.target.value)}
-                  placeholder="Enter Primary Owner ID"
+                  placeholder="e.g. your-email@gmail.com or Primary Owner ID"
                   className="w-full bg-[#200f07] border border-[#dfb76c]/40 rounded-xl pl-9 pr-3 py-2 text-xs text-[#f5efe6] placeholder-[#dfb76c]/40 focus:outline-none focus:border-[#dfb76c]"
                 />
               </div>
@@ -495,7 +519,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
                   onClick={() => {
                     setViewMode('forgot-email');
                     setRecoveryEmail(
-                      getLocalSettings().primaryOwnerEmail || 'cherry1011705897@gmail.com'
+                      getLocalSettings().primaryOwnerEmail || 'clnarasimha08@email.com'
                     );
                     setError(null);
                   }}

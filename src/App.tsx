@@ -10,7 +10,7 @@ import {
   subscribeMenuItems,
   seedInitialMenuIfEmpty,
 } from './services/menuService';
-import { subscribeAuth, logoutUser } from './services/authService';
+import { subscribeAuth, logoutUser, syncSettingsAndUsersFromFirestore } from './services/authService';
 import { subscribeActivityLogs } from './services/logService';
 import { PublicMenuCard } from './components/PublicMenuCard';
 import { OwnerLogin } from './components/OwnerLogin';
@@ -64,6 +64,9 @@ export default function App() {
   useEffect(() => {
     // Attempt Firestore initial seed if empty
     seedInitialMenuIfEmpty().catch(console.warn);
+
+    // Sync settings & user accounts from cloud
+    syncSettingsAndUsersFromFirestore().catch(console.warn);
 
     // Subscribe to live categories
     const unsubCats = subscribeCategories((cats) => {

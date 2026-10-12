@@ -20,7 +20,8 @@ import { auth, db } from '../firebase';
 import { UserProfile, UserRole, RolePermissions, CafeSettings } from '../types';
 import { logActivity } from './logService';
 
-const PRIMARY_OWNER_EMAIL = 'cherry1011705897@gmail.com';
+const PRIMARY_OWNER_EMAIL = 'clnarasimha08@email.com';
+const FALLBACK_OWNER_EMAIL = 'cherry1011705897@gmail.com';
 const LOCAL_USERS_KEY = 'chaiden_local_users_v2';
 const LOCAL_SETTINGS_KEY = 'chaiden_settings_v2';
 
@@ -72,6 +73,16 @@ const DEFAULT_USERS: UserProfile[] = [
     userId: 'owner_primary',
     name: 'The Chai Den Owner',
     email: PRIMARY_OWNER_EMAIL,
+    role: 'OWNER',
+    permissions: DEFAULT_PERMISSIONS.OWNER,
+    active: true,
+    password: 'owner@chaiden',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    userId: 'owner_legacy',
+    name: 'The Chai Den Owner (Alt)',
+    email: FALLBACK_OWNER_EMAIL,
     role: 'OWNER',
     permissions: DEFAULT_PERMISSIONS.OWNER,
     active: true,
@@ -183,6 +194,45 @@ export async function saveSettings(settings: Partial<CafeSettings>): Promise<voi
   }
 }
 
+export async function syncSettingsAndUsersFromFirestore(): Promise<void> {
+  try {
+    const settingsSnap = await getDoc(doc(db, 'settings', 'cafe'));
+    if (settingsSnap.exists()) {
+      const data = settingsSnap.data() as CafeSettings;
+      const current = getLocalSettings();
+      const merged = { ...current, ...data };
+      localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(merged));
+    }
+  } catch (err) {
+    console.warn('[Firestore] Notice syncing settings from cloud:', err);
+  }
+
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    if (!usersSnap.empty) {
+      const fetched: UserProfile[] = [];
+      usersSnap.forEach((d) => {
+        fetched.push(d.data() as UserProfile);
+      });
+      const current = getLocalUsers();
+      const merged = [...current];
+      fetched.forEach((u) => {
+        const idx = merged.findIndex(
+          (m) => m.userId === u.userId || (u.email && m.email.toLowerCase() === u.email.toLowerCase())
+        );
+        if (idx >= 0) {
+          merged[idx] = { ...merged[idx], ...u };
+        } else {
+          merged.push(u);
+        }
+      });
+      saveLocalUsers(merged);
+    }
+  } catch (err) {
+    console.warn('[Firestore] Notice syncing users from cloud:', err);
+  }
+}
+
 export async function verifyBackupEmail(code: string): Promise<boolean> {
   // 6-digit numeric verification code verification
   if (code.trim().length === 6 && /^\d+$/.test(code.trim())) {
@@ -276,27 +326,48 @@ export function getPrimaryOwnerId(): string {
 
 export function validatePrimaryOwnerId(enteredId: string): boolean {
   if (!enteredId || !enteredId.trim()) return false;
-  const currentId = getPrimaryOwnerId().toLowerCase();
   const entered = enteredId.trim().toLowerCase();
-  return entered === currentId;
+  const settings = getLocalSettings();
+  const currentOwnerId = (settings.primaryOwnerId || '').toLowerCase();
+  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).toLowerCase();
+  const allUsers = getLocalUsers();
+
+  // 1. Matches configured Owner ID or Email
+  if (
+    entered === currentOwnerId ||
+    entered === currentOwnerEmail ||
+    entered === PRIMARY_OWNER_EMAIL.toLowerCase() ||
+    entered === FALLBACK_OWNER_EMAIL.toLowerCase()
+  ) {
+    return true;
+  }
+
+  // 2. Matches any registered user account's email or user ID
+  if (allUsers.some((u) => u.email.toLowerCase() === entered || u.userId.toLowerCase() === entered)) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function loginUser(enteredPrimaryId: string, pass: string): Promise<UserProfile> {
   const cleanId = enteredPrimaryId.trim();
   if (!cleanId) {
-    throw new Error('Primary Owner ID is required. Please enter the Primary Owner ID.');
+    throw new Error('Please enter your Registered Gmail or Primary Owner ID.');
   }
 
-  // 1. Strict Primary Owner ID requirement:
-  // Owner, Co-Owner, Manager, Staff must enter the active Primary Owner ID to sign in.
+  // Ensure latest settings and users are freshly synced from cloud
+  await syncSettingsAndUsersFromFirestore();
+
   if (!validatePrimaryOwnerId(cleanId)) {
-    throw new Error('Invalid Primary Owner ID. Access denied. Only authorized users with the valid Primary Owner ID can log in.');
+    throw new Error('Invalid Owner ID or Email. Please enter your registered Owner Gmail or Primary Owner ID.');
   }
 
   const allUsers = getLocalUsers();
-  const currentOwnerEmail = (getLocalSettings().primaryOwnerEmail || PRIMARY_OWNER_EMAIL).toLowerCase();
+  const settings = getLocalSettings();
+  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).toLowerCase();
 
-  // Try real Firebase Auth first if Primary Owner ID is an email
+  // Try Firebase Auth if entered credential is an email
   if (cleanId.includes('@')) {
     try {
       const cred = await signInWithEmailAndPassword(auth, cleanId.toLowerCase(), pass);
@@ -322,47 +393,71 @@ export async function loginUser(enteredPrimaryId: string, pass: string): Promise
       }
 
       localStorage.setItem('chaiden_active_session', JSON.stringify(profile));
-      await logActivity('User Login', `Logged in via Firebase Auth with Primary Owner ID: ${cleanId}`, cleanId, profile.userId);
+      await logActivity('User Login', `Logged in via Firebase Auth with email: ${cleanId}`, cleanId, profile.userId);
       return profile;
     } catch {
       // Fall through to matching registered user accounts by password
     }
   }
 
-  // 2. Identify the authorized user (Owner, Co-Owner, Manager, Staff) by credentials
-  const rolePriority: ('OWNER' | 'CO_OWNER' | 'MANAGER' | 'STAFF')[] = ['OWNER', 'CO_OWNER', 'MANAGER', 'STAFF'];
-
+  // Match by email and password first
   let matchedUser: UserProfile | undefined;
-  for (const role of rolePriority) {
-    const candidate = allUsers.find((u) => u.role === role && u.password === pass);
-    if (candidate) {
-      matchedUser = candidate;
-      break;
+  if (cleanId.includes('@')) {
+    matchedUser = allUsers.find(
+      (u) => u.email.toLowerCase() === cleanId.toLowerCase() && u.password === pass
+    );
+  }
+
+  // Check if cleanId represents the active Owner and password matches
+  if (!matchedUser) {
+    const isOwnerId =
+      cleanId.toLowerCase() === (settings.primaryOwnerId || '').toLowerCase() ||
+      cleanId.toLowerCase() === currentOwnerEmail ||
+      cleanId.toLowerCase() === PRIMARY_OWNER_EMAIL.toLowerCase() ||
+      cleanId.toLowerCase() === FALLBACK_OWNER_EMAIL.toLowerCase();
+
+    if (isOwnerId) {
+      matchedUser = allUsers.find(
+        (u) => (u.role === 'OWNER' || u.userId === 'owner_primary') && u.password === pass
+      );
+    }
+  }
+
+  // Fallback: match by password across roles
+  if (!matchedUser) {
+    const rolePriority: ('OWNER' | 'CO_OWNER' | 'MANAGER' | 'STAFF')[] = [
+      'OWNER',
+      'CO_OWNER',
+      'MANAGER',
+      'STAFF',
+    ];
+    for (const role of rolePriority) {
+      const candidate = allUsers.find((u) => u.role === role && u.password === pass);
+      if (candidate) {
+        matchedUser = candidate;
+        break;
+      }
     }
   }
 
   if (!matchedUser) {
-    matchedUser = allUsers.find((u) => u.password === pass);
+    throw new Error('Incorrect password. Please verify and try again.');
   }
 
-  if (matchedUser) {
-    if (!matchedUser.active) {
-      throw new Error('This account has been disabled by the Owner.');
-    }
-
-    const sessionEmail = matchedUser.role === 'OWNER' ? currentOwnerEmail : matchedUser.email;
-    const authenticatedUser: UserProfile = { ...matchedUser, email: sessionEmail };
-    localStorage.setItem('chaiden_active_session', JSON.stringify(authenticatedUser));
-    await logActivity(
-      'User Login',
-      `Signed in with Primary Owner ID as ${matchedUser.role}: ${matchedUser.name}`,
-      sessionEmail,
-      matchedUser.userId
-    );
-    return authenticatedUser;
+  if (!matchedUser.active) {
+    throw new Error('This account has been disabled by the Owner.');
   }
 
-  throw new Error('Incorrect password. Please verify and try again.');
+  const sessionEmail = cleanId.includes('@') ? cleanId.toLowerCase() : (matchedUser.email || currentOwnerEmail);
+  const authenticatedUser: UserProfile = { ...matchedUser, email: sessionEmail };
+  localStorage.setItem('chaiden_active_session', JSON.stringify(authenticatedUser));
+  await logActivity(
+    'User Login',
+    `Signed in as ${matchedUser.role}: ${matchedUser.name} (${sessionEmail})`,
+    sessionEmail,
+    matchedUser.userId
+  );
+  return authenticatedUser;
 }
 
 export interface PasswordResetOtpSession {
@@ -588,12 +683,31 @@ export async function resetPasswordWithOtp(email: string, code: string, newPassw
   }
 
   const allUsers = getLocalUsers();
-  const targetUser = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
+  let updatedAny = false;
+  for (const u of allUsers) {
+    if (
+      u.email.toLowerCase() === cleanEmail ||
+      u.role === 'OWNER' ||
+      u.userId === 'owner_primary'
+    ) {
+      await changeUserPassword(u.userId, newPassword);
+      updatedAny = true;
+    }
+  }
 
-  if (targetUser) {
-    await changeUserPassword(targetUser.userId, newPassword);
-  } else if (cleanEmail === PRIMARY_OWNER_EMAIL) {
+  if (!updatedAny) {
     await changeUserPassword('owner_primary', newPassword);
+  }
+
+  // Also directly update in Firestore collection /users/owner_primary
+  try {
+    await setDoc(
+      doc(db, 'users', 'owner_primary'),
+      { password: newPassword, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Sync new password to Firestore notice:', err);
   }
 
   // Clear OTP session once successfully used
@@ -849,6 +963,7 @@ export interface ForgotPasswordResponse {
   message: string;
   expiresIn?: number;
   resendCooldown?: number;
+  devOtp?: string;
 }
 
 export interface VerifyOtpResponse {

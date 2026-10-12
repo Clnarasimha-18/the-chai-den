@@ -277,12 +277,19 @@ async function handleGenerateOtpLogic(email: string) {
 
   // 4. Trigger email send via SMTP using .env variables
   await sendOtpEmail(cleanEmail, rawOtp);
+  const hasSmtp = !!getEmailTransporter();
+
+  let message = `A 4-digit verification code has been sent to your Gmail (${cleanEmail}). Please check your inbox or spam folder.`;
+  if (!hasSmtp) {
+    message = `Verification code for ${cleanEmail} is ready! (Note: Since Gmail App Password is not yet set in Vercel environment variables, your 4-digit code is: ${rawOtp})`;
+  }
 
   return {
     success: true,
-    message: `A 4-digit verification code has been sent to your Gmail (${cleanEmail}). Please check your inbox or spam folder.`,
+    message,
     expiresIn: 600,
     resendCooldown: 60,
+    devOtp: !hasSmtp ? rawOtp : undefined,
   };
 }
 
@@ -586,12 +593,18 @@ app.post('/api/auth/verify-reset-otp', async (req: Request, res: Response) => {
     await markOtpUsedInFirestore(cleanEmail);
 
     const resetToken = crypto.randomBytes(32).toString('hex');
-    resetTokenStore.set(resetToken, {
+    const tokenRecord: ResetTokenRecord = {
       token: resetToken,
       email: cleanEmail,
       expiresAt: now + 10 * 60 * 1000,
       used: false,
-    });
+    };
+    resetTokenStore.set(resetToken, tokenRecord);
+    try {
+      await setDoc(doc(serverDb, 'resetTokens', resetToken), tokenRecord);
+    } catch (saveErr) {
+      console.warn('[Firestore] Notice saving reset token:', saveErr);
+    }
 
     return res.status(200).json({
       success: true,
@@ -672,7 +685,17 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const tokenRecord = resetTokenStore.get(resetToken);
+    let tokenRecord = resetTokenStore.get(resetToken);
+    if (!tokenRecord) {
+      try {
+        const snap = await getDoc(doc(serverDb, 'resetTokens', resetToken));
+        if (snap.exists()) {
+          tokenRecord = snap.data() as ResetTokenRecord;
+        }
+      } catch (dbErr) {
+        console.warn('[Firestore] Error reading reset token:', dbErr);
+      }
+    }
     const now = Date.now();
 
     if (!tokenRecord || tokenRecord.used || tokenRecord.email !== cleanEmail) {
@@ -716,6 +739,19 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
     tokenRecord.used = true;
     resetTokenStore.delete(resetToken);
     otpStore.delete(cleanEmail);
+
+    try {
+      await updateDoc(doc(serverDb, 'resetTokens', resetToken), { used: true });
+      await markOtpUsedInFirestore(cleanEmail);
+      // Persist plaintext for local user profile matching and hashed for security
+      await setDoc(
+        doc(serverDb, 'users', 'owner_primary'),
+        { password: newPassword, hashedPassword, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch (saveErr) {
+      console.warn('[Firestore] Notice updating user password:', saveErr);
+    }
 
     console.log(`[AuthService] Password updated successfully for: ${cleanEmail}`);
 
