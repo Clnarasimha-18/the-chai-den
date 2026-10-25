@@ -519,7 +519,7 @@ export const OwnerLogin: React.FC<OwnerLoginProps> = ({
                   onClick={() => {
                     setViewMode('forgot-email');
                     setRecoveryEmail(
-                      getLocalSettings().primaryOwnerEmail || 'clnarasimha08@email.com'
+                      getLocalSettings().primaryOwnerEmail || 'clnarasimha08@gmail.com'
                     );
                     setError(null);
                   }}

@@ -20,10 +20,9 @@ import { auth, db } from '../firebase';
 import { UserProfile, UserRole, RolePermissions, CafeSettings } from '../types';
 import { logActivity } from './logService';
 
-const PRIMARY_OWNER_EMAIL = 'clnarasimha08@email.com';
-const FALLBACK_OWNER_EMAIL = 'cherry1011705897@gmail.com';
-const LOCAL_USERS_KEY = 'chaiden_local_users_v2';
-const LOCAL_SETTINGS_KEY = 'chaiden_settings_v2';
+const PRIMARY_OWNER_EMAIL = 'clnarasimha08@gmail.com';
+const LOCAL_USERS_KEY = 'chaiden_local_users_v3';
+const LOCAL_SETTINGS_KEY = 'chaiden_settings_v3';
 
 export const DEFAULT_PERMISSIONS: Record<UserRole, RolePermissions> = {
   OWNER: {
@@ -80,16 +79,6 @@ const DEFAULT_USERS: UserProfile[] = [
     createdAt: new Date().toISOString(),
   },
   {
-    userId: 'owner_legacy',
-    name: 'The Chai Den Owner (Alt)',
-    email: FALLBACK_OWNER_EMAIL,
-    role: 'OWNER',
-    permissions: DEFAULT_PERMISSIONS.OWNER,
-    active: true,
-    password: 'owner@chaiden',
-    createdAt: new Date().toISOString(),
-  },
-  {
     userId: 'co_owner_1',
     name: 'The Chai Den Co-Owner',
     email: 'coowner@chaiden.com',
@@ -135,26 +124,51 @@ const DEFAULT_SETTINGS: CafeSettings = {
 function getLocalUsers(): UserProfile[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    if (raw) {
-      const users: UserProfile[] = JSON.parse(raw);
-      // Ensure co-owner is available
-      if (!users.some((u) => u.role === 'CO_OWNER' || u.email.toLowerCase() === 'coowner@chaiden.com')) {
-        const coOwnerUser: UserProfile = {
-          userId: 'co_owner_1',
-          name: 'The Chai Den Co-Owner',
-          email: 'coowner@chaiden.com',
-          role: 'CO_OWNER',
-          permissions: DEFAULT_PERMISSIONS.CO_OWNER,
-          active: true,
-          password: 'coowner@chaiden',
-          createdAt: new Date().toISOString(),
-        };
-        users.push(coOwnerUser);
-        saveLocalUsers(users);
-      }
-      return users;
+    const settings = getLocalSettings();
+    const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).trim().toLowerCase();
+
+    let users: UserProfile[] = raw ? JSON.parse(raw) : [...DEFAULT_USERS];
+
+    // Guarantee exactly ONE OWNER exists and its email strictly matches currentOwnerEmail
+    const nonOwners = users.filter((u) => u.role !== 'OWNER' && u.userId !== 'owner_primary');
+    let owner = users.find((u) => u.role === 'OWNER' || u.userId === 'owner_primary');
+
+    if (!owner) {
+      owner = {
+        userId: 'owner_primary',
+        name: 'The Chai Den Owner',
+        email: currentOwnerEmail,
+        role: 'OWNER',
+        permissions: DEFAULT_PERMISSIONS.OWNER,
+        active: true,
+        password: 'owner@chaiden',
+        createdAt: new Date().toISOString(),
+      };
+    } else {
+      owner.email = currentOwnerEmail;
+      owner.role = 'OWNER';
     }
-    return DEFAULT_USERS;
+
+    // Ensure co-owner is available
+    if (!nonOwners.some((u) => u.role === 'CO_OWNER' || u.email.toLowerCase() === 'coowner@chaiden.com')) {
+      const coOwnerUser: UserProfile = {
+        userId: 'co_owner_1',
+        name: 'The Chai Den Co-Owner',
+        email: 'coowner@chaiden.com',
+        role: 'CO_OWNER',
+        permissions: DEFAULT_PERMISSIONS.CO_OWNER,
+        active: true,
+        password: 'coowner@chaiden',
+        createdAt: new Date().toISOString(),
+      };
+      nonOwners.push(coOwnerUser);
+    }
+
+    const cleanUsers = [owner, ...nonOwners];
+    if (JSON.stringify(cleanUsers) !== raw) {
+      saveLocalUsers(cleanUsers);
+    }
+    return cleanUsers;
   } catch {
     return DEFAULT_USERS;
   }
@@ -329,21 +343,22 @@ export function validatePrimaryOwnerId(enteredId: string): boolean {
   const entered = enteredId.trim().toLowerCase();
   const settings = getLocalSettings();
   const currentOwnerId = (settings.primaryOwnerId || '').toLowerCase();
-  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).toLowerCase();
+  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).trim().toLowerCase();
   const allUsers = getLocalUsers();
 
-  // 1. Matches configured Owner ID or Email
+  // 1. Matches active registered Owner Email or Owner ID
   if (
-    entered === currentOwnerId ||
     entered === currentOwnerEmail ||
-    entered === PRIMARY_OWNER_EMAIL.toLowerCase() ||
-    entered === FALLBACK_OWNER_EMAIL.toLowerCase()
+    (currentOwnerId && entered === currentOwnerId) ||
+    entered === 'owner' ||
+    entered === 'admin' ||
+    entered === 'owner_primary'
   ) {
     return true;
   }
 
-  // 2. Matches any registered user account's email or user ID
-  if (allUsers.some((u) => u.email.toLowerCase() === entered || u.userId.toLowerCase() === entered)) {
+  // 2. Matches any registered non-owner staff user account's email or user ID
+  if (allUsers.some((u) => u.role !== 'OWNER' && (u.email.toLowerCase() === entered || u.userId.toLowerCase() === entered))) {
     return true;
   }
 
@@ -359,105 +374,129 @@ export async function loginUser(enteredPrimaryId: string, pass: string): Promise
   // Ensure latest settings and users are freshly synced from cloud
   await syncSettingsAndUsersFromFirestore();
 
-  if (!validatePrimaryOwnerId(cleanId)) {
-    throw new Error('Invalid Owner ID or Email. Please enter your registered Owner Gmail or Primary Owner ID.');
-  }
-
-  const allUsers = getLocalUsers();
   const settings = getLocalSettings();
-  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).toLowerCase();
+  const currentOwnerEmail = (settings.primaryOwnerEmail || PRIMARY_OWNER_EMAIL).trim().toLowerCase();
+  const currentOwnerId = (settings.primaryOwnerId || '').toLowerCase();
+  const allUsers = getLocalUsers();
 
-  // Try Firebase Auth if entered credential is an email
-  if (cleanId.includes('@')) {
-    try {
-      const cred = await signInWithEmailAndPassword(auth, cleanId.toLowerCase(), pass);
-      const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
-      let profile: UserProfile;
-      if (userDoc.exists()) {
-        profile = userDoc.data() as UserProfile;
-      } else {
-        profile = {
-          userId: cred.user.uid,
-          name: 'The Chai Den Owner',
-          email: cleanId.toLowerCase(),
-          role: 'OWNER',
-          permissions: DEFAULT_PERMISSIONS.OWNER,
-          active: true,
-          createdAt: new Date().toISOString(),
-        };
-        await setDoc(doc(db, 'users', cred.user.uid), profile);
-      }
-
-      if (!profile.active) {
-        throw new Error('This account has been disabled by the Owner.');
-      }
-
-      localStorage.setItem('chaiden_active_session', JSON.stringify(profile));
-      await logActivity('User Login', `Logged in via Firebase Auth with email: ${cleanId}`, cleanId, profile.userId);
-      return profile;
-    } catch {
-      // Fall through to matching registered user accounts by password
-    }
-  }
-
-  // Match by email and password first
-  let matchedUser: UserProfile | undefined;
-  if (cleanId.includes('@')) {
-    matchedUser = allUsers.find(
-      (u) => u.email.toLowerCase() === cleanId.toLowerCase() && u.password === pass
-    );
-  }
-
-  // Check if cleanId represents the active Owner and password matches
-  if (!matchedUser) {
-    const isOwnerId =
-      cleanId.toLowerCase() === (settings.primaryOwnerId || '').toLowerCase() ||
-      cleanId.toLowerCase() === currentOwnerEmail ||
-      cleanId.toLowerCase() === PRIMARY_OWNER_EMAIL.toLowerCase() ||
-      cleanId.toLowerCase() === FALLBACK_OWNER_EMAIL.toLowerCase();
-
-    if (isOwnerId) {
-      matchedUser = allUsers.find(
-        (u) => (u.role === 'OWNER' || u.userId === 'owner_primary') && u.password === pass
+  if (!validatePrimaryOwnerId(cleanId)) {
+    if (cleanId.includes('@')) {
+      throw new Error(
+        `Invalid credentials. Only the registered Cafe Owner email (${currentOwnerEmail}) is authorized to sign in as Owner.`
       );
     }
+    throw new Error('Invalid Owner ID or Email. Please sign in using your active registered Owner Gmail or Owner ID.');
   }
 
-  // Fallback: match by password across roles
-  if (!matchedUser) {
-    const rolePriority: ('OWNER' | 'CO_OWNER' | 'MANAGER' | 'STAFF')[] = [
-      'OWNER',
-      'CO_OWNER',
-      'MANAGER',
-      'STAFF',
-    ];
-    for (const role of rolePriority) {
-      const candidate = allUsers.find((u) => u.role === role && u.password === pass);
-      if (candidate) {
-        matchedUser = candidate;
-        break;
+  // 1. Email-based login
+  if (cleanId.includes('@')) {
+    const inputEmail = cleanId.toLowerCase();
+
+    // Check if entered email matches current active owner email
+    if (inputEmail === currentOwnerEmail) {
+      // Try Firebase Auth if configured
+      try {
+        const cred = await signInWithEmailAndPassword(auth, inputEmail, pass);
+        const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
+        let profile: UserProfile;
+        if (userDoc.exists()) {
+          profile = userDoc.data() as UserProfile;
+        } else {
+          profile = {
+            userId: cred.user.uid,
+            name: 'The Chai Den Owner',
+            email: currentOwnerEmail,
+            role: 'OWNER',
+            permissions: DEFAULT_PERMISSIONS.OWNER,
+            active: true,
+            createdAt: new Date().toISOString(),
+          };
+          await setDoc(doc(db, 'users', cred.user.uid), profile);
+        }
+        if (!profile.active) {
+          throw new Error('This account has been disabled.');
+        }
+        localStorage.setItem('chaiden_active_session', JSON.stringify(profile));
+        await logActivity('Owner Login', `Logged in via Firebase Auth: ${currentOwnerEmail}`, currentOwnerEmail, profile.userId);
+        return profile;
+      } catch {
+        // Fall through to local credentials
       }
-    }
-  }
 
-  if (!matchedUser) {
+      const ownerUser = allUsers.find((u) => u.role === 'OWNER' || u.userId === 'owner_primary');
+      if (ownerUser && ownerUser.password === pass) {
+        if (!ownerUser.active) {
+          throw new Error('This account has been disabled.');
+        }
+        const authUser: UserProfile = { ...ownerUser, email: currentOwnerEmail };
+        localStorage.setItem('chaiden_active_session', JSON.stringify(authUser));
+        await logActivity('Owner Login', `Signed in as Cafe Owner: ${currentOwnerEmail}`, currentOwnerEmail, authUser.userId);
+        return authUser;
+      }
+      throw new Error('Incorrect password for Owner account. Please verify and try again.');
+    }
+
+    // Check non-owner staff accounts (Co-Owner, Manager, Staff)
+    const staffUser = allUsers.find(
+      (u) => u.role !== 'OWNER' && u.email.toLowerCase() === inputEmail && u.password === pass
+    );
+
+    if (staffUser) {
+      if (!staffUser.active) {
+        throw new Error('This account has been disabled by the Owner.');
+      }
+      localStorage.setItem('chaiden_active_session', JSON.stringify(staffUser));
+      await logActivity(
+        'Staff Login',
+        `Signed in as ${staffUser.role}: ${staffUser.name} (${staffUser.email})`,
+        staffUser.email,
+        staffUser.userId
+      );
+      return staffUser;
+    }
+
     throw new Error('Incorrect password. Please verify and try again.');
   }
 
-  if (!matchedUser.active) {
-    throw new Error('This account has been disabled by the Owner.');
+  // 2. Owner Alias / ID login (e.g. 'owner', 'admin', or custom primaryOwnerId)
+  const isOwnerAlias =
+    (currentOwnerId && cleanId.toLowerCase() === currentOwnerId) ||
+    cleanId.toLowerCase() === 'owner' ||
+    cleanId.toLowerCase() === 'admin' ||
+    cleanId.toLowerCase() === 'owner_primary';
+
+  if (isOwnerAlias) {
+    const ownerUser = allUsers.find((u) => u.role === 'OWNER' || u.userId === 'owner_primary');
+    if (ownerUser && ownerUser.password === pass) {
+      if (!ownerUser.active) {
+        throw new Error('This account has been disabled.');
+      }
+      const authUser: UserProfile = { ...ownerUser, email: currentOwnerEmail };
+      localStorage.setItem('chaiden_active_session', JSON.stringify(authUser));
+      await logActivity(
+        'Owner Login',
+        `Signed in as Cafe Owner via Owner ID (${currentOwnerEmail})`,
+        currentOwnerEmail,
+        authUser.userId
+      );
+      return authUser;
+    }
+    throw new Error('Incorrect password for Owner account.');
   }
 
-  const sessionEmail = cleanId.includes('@') ? cleanId.toLowerCase() : (matchedUser.email || currentOwnerEmail);
-  const authenticatedUser: UserProfile = { ...matchedUser, email: sessionEmail };
-  localStorage.setItem('chaiden_active_session', JSON.stringify(authenticatedUser));
-  await logActivity(
-    'User Login',
-    `Signed in as ${matchedUser.role}: ${matchedUser.name} (${sessionEmail})`,
-    sessionEmail,
-    matchedUser.userId
+  // 3. Non-owner staff by userId
+  const staffById = allUsers.find(
+    (u) => u.role !== 'OWNER' && u.userId.toLowerCase() === cleanId.toLowerCase() && u.password === pass
   );
-  return authenticatedUser;
+  if (staffById) {
+    if (!staffById.active) {
+      throw new Error('This account has been disabled by the Owner.');
+    }
+    localStorage.setItem('chaiden_active_session', JSON.stringify(staffById));
+    return staffById;
+  }
+
+  throw new Error('Incorrect password. Please verify and try again.');
 }
 
 export interface PasswordResetOtpSession {
@@ -840,6 +879,23 @@ export async function createUser(
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
   const current = getLocalUsers();
   const targetUser = current.find((u) => u.userId === userId);
+
+  // If updating an owner's email, synchronize settings.primaryOwnerEmail and purge old owner references
+  if (updates.email && (targetUser?.role === 'OWNER' || userId === 'owner_primary' || updates.role === 'OWNER')) {
+    const cleanNewEmail = updates.email.trim().toLowerCase();
+    await updatePrimaryOwnerEmail(cleanNewEmail);
+    if (updates.password || updates.name) {
+      const freshUsers = getLocalUsers();
+      const updatedUsers = freshUsers.map((u) =>
+        u.userId === userId || u.role === 'OWNER'
+          ? { ...u, ...(updates.password ? { password: updates.password } : {}), ...(updates.name ? { name: updates.name } : {}) }
+          : u
+      );
+      saveLocalUsers(updatedUsers);
+    }
+    return;
+  }
+
   const next = current.map((u) => (u.userId === userId ? { ...u, ...updates } : u));
   saveLocalUsers(next);
 
@@ -853,15 +909,6 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
       }
     } catch {
       // ignore
-    }
-  }
-
-  // If updating an owner's email, synchronize settings.primaryOwnerEmail
-  if (updates.email && (targetUser?.role === 'OWNER' || userId === 'owner_primary')) {
-    const cleanNewEmail = updates.email.trim().toLowerCase();
-    const settings = getLocalSettings();
-    if (settings.primaryOwnerEmail === targetUser?.email || userId === 'owner_primary') {
-      await saveSettings({ primaryOwnerEmail: cleanNewEmail });
     }
   }
 
@@ -880,32 +927,45 @@ export async function updatePrimaryOwnerEmail(newEmail: string, updaterEmail?: s
     throw new Error('Please enter a valid email address.');
   }
 
+  // 1. Update global cafe settings
   await saveSettings({ primaryOwnerEmail: cleanEmail, primaryOwnerId: cleanEmail });
 
+  // 2. Ensure only ONE OWNER exists in the user registry with this new email
   const current = getLocalUsers();
-  const ownerUser = current.find((u) => u.role === 'OWNER' || u.userId === 'owner_primary');
-  if (ownerUser) {
-    await updateUserProfile(ownerUser.userId, { email: cleanEmail });
-  } else {
-    const newOwner: UserProfile = {
-      userId: 'owner_primary',
-      name: 'The Chai Den Owner',
-      email: cleanEmail,
-      role: 'OWNER',
-      permissions: DEFAULT_PERMISSIONS.OWNER,
-      active: true,
-      password: 'owner@chaiden',
-      createdAt: new Date().toISOString(),
-    };
-    saveLocalUsers([newOwner, ...current]);
+  const nonOwners = current.filter((u) => u.role !== 'OWNER' && u.userId !== 'owner_primary');
+  const existingOwner = current.find((u) => u.role === 'OWNER' || u.userId === 'owner_primary');
+
+  const updatedOwner: UserProfile = {
+    userId: existingOwner?.userId || 'owner_primary',
+    name: existingOwner?.name || 'The Chai Den Owner',
+    email: cleanEmail,
+    role: 'OWNER',
+    permissions: DEFAULT_PERMISSIONS.OWNER,
+    active: true,
+    password: existingOwner?.password || 'owner@chaiden',
+    createdAt: existingOwner?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const nextUsers = [updatedOwner, ...nonOwners];
+  saveLocalUsers(nextUsers);
+
+  // 3. Persist to Firestore
+  try {
+    await setDoc(doc(db, 'users', updatedOwner.userId), updatedOwner, { merge: true });
+    // Remove any legacy owner records from Firestore so they cannot be loaded
+    await deleteDoc(doc(db, 'users', 'owner_alt')).catch(() => {});
+    await deleteDoc(doc(db, 'users', 'owner_legacy')).catch(() => {});
+  } catch (e) {
+    console.warn('Sync updated owner to Firestore notice:', e);
   }
 
-  // Update active session so the UI immediately reflects the new email
+  // 4. Update active session so the UI immediately reflects the new email
   const activeSessionRaw = localStorage.getItem('chaiden_active_session');
   if (activeSessionRaw) {
     try {
       const activeSession = JSON.parse(activeSessionRaw);
-      if (activeSession.role === 'OWNER' || activeSession.userId === 'owner_primary') {
+      if (activeSession.role === 'OWNER' || activeSession.userId === updatedOwner.userId) {
         activeSession.email = cleanEmail;
         localStorage.setItem('chaiden_active_session', JSON.stringify(activeSession));
       }
@@ -914,7 +974,11 @@ export async function updatePrimaryOwnerEmail(newEmail: string, updaterEmail?: s
     }
   }
 
-  await logActivity('Owner Email Changed', `Updated registered owner email to ${cleanEmail}`, updaterEmail || cleanEmail);
+  await logActivity(
+    'Owner Email Changed',
+    `Updated registered owner email to ${cleanEmail}. Previous owner emails invalidated for owner login.`,
+    updaterEmail || cleanEmail
+  );
 }
 
 export async function updatePrimaryOwnerId(newId: string, updaterEmail?: string): Promise<void> {

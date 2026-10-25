@@ -3,6 +3,8 @@ import { Category, MenuItem } from '../types';
 import { QrCode, Lock, X, Github, Linkedin, Mail } from 'lucide-react';
 import { ChaiDenLogo } from './ChaiDenLogo';
 import { ChaiMugHero } from './ChaiMugHero';
+import { CategoryIcon } from './CategoryIcon';
+import { MilkshakesTallGlass, MilkshakesRowMini } from './MilkshakesVisual';
 
 interface PublicMenuCardProps {
   categories: Category[];
@@ -20,7 +22,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('all');
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [liveMenuItems, setLiveMenuItems] = useState<MenuItem[]>(propMenuItems);
-  const [recentlyUpdatedPriceId, setRecentlyUpdatedPriceId] = useState<string | null>(null);
+  const [recentlyUpdatedPriceId] = useState<string | null>(null);
 
   // Sync propMenuItems into liveMenuItems
   useEffect(() => {
@@ -89,7 +91,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
     }
   };
 
-  // Group categories into 3 columns
+  // Group categories into 3 columns matching physical menu card layout
   const col1Categories = filteredCategories.filter((c) =>
     ['teas', 'flavored_milks', 'hot_coffees'].some((k) => isCategoryMatch(c, k))
   );
@@ -100,7 +102,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
     ['premium_shakes', 'cold_coffees', 'lassis'].some((k) => isCategoryMatch(c, k))
   );
 
-  // Catch any unassigned or newly added categories so NONE are ever hidden
+  // Catch any unassigned categories so none are ever lost
   const assignedIds = new Set([
     ...col1Categories.map((c) => c.id),
     ...col2Categories.map((c) => c.id),
@@ -113,42 +115,34 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
     else col3Categories.push(cat);
   });
 
-  // Category specific decorative banner graphics matching physical card
-  const categoryHeaderImages: Record<string, { image: string; alt: string }> = {
-    cat_teas: {
-      image: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=400&q=80',
-      alt: "Tea's",
-    },
-    cat_milkshakes: {
-      image: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?auto=format&fit=crop&w=600&q=80',
-      alt: 'Milk Shakes',
-    },
-    cat_premium_shakes: {
-      image: 'https://images.unsplash.com/photo-1579954115545-a95591f28bfc?auto=format&fit=crop&w=600&q=80',
-      alt: "Premium Shake's",
-    },
+  // Category specific banner graphics positioned at bottom of each card (exact to physical menu)
+  const categoryFooterImages: Record<string, { image: string; alt: string }> = {
     cat_flavored_milks: {
-      image: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?auto=format&fit=crop&w=500&q=80',
+      image: '/images/flavored_milks.jpg',
       alt: "Flavored Milk's",
     },
-    cat_milks: {
-      image: 'https://images.unsplash.com/photo-1556881286-fc6915169721?auto=format&fit=crop&w=500&q=80',
-      alt: "Milk's",
-    },
-    cat_cold_coffees: {
-      image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=500&q=80',
-      alt: "Cold Coffee's",
-    },
     cat_hot_coffees: {
-      image: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=500&q=80',
+      image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=600&q=80',
       alt: "Coffe's (Hot)",
     },
+    cat_milks: {
+      image: '/images/spiced_milks.jpg',
+      alt: "Milk's",
+    },
     cat_coolers: {
-      image: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=500&q=80',
+      image: '/images/coolers.jpg',
       alt: "Cooler's & Mojito's",
     },
+    cat_premium_shakes: {
+      image: '/images/premium_shakes.jpg',
+      alt: "Premium Shake's",
+    },
+    cat_cold_coffees: {
+      image: '/images/cold_coffees.jpg',
+      alt: "Cold Coffee's",
+    },
     cat_lassis: {
-      image: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=500&q=80',
+      image: '/images/lassis.jpg',
       alt: "Lassi's",
     },
   };
@@ -163,13 +157,28 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
     );
 
     if (items.length === 0) {
-      // Fallback matching by canonical key
-      const catKey = Object.keys(categoryHeaderImages).find((k) =>
-        isCategoryMatch(cat, k.replace('cat_', ''))
-      );
-      if (catKey) {
+      const allCategoryKeys = [
+        'teas',
+        'milkshakes',
+        'premium_shakes',
+        'flavored_milks',
+        'milks',
+        'cold_coffees',
+        'hot_coffees',
+        'coolers',
+        'lassis',
+      ];
+      const matchedKey = allCategoryKeys.find((k) => isCategoryMatch(cat, k));
+      if (matchedKey) {
         items = liveMenuItems.filter(
-          (item) => item.active !== false && item.categoryId === catKey
+          (item) =>
+            item.active !== false &&
+            (item.categoryId === `cat_${matchedKey}` ||
+              item.categoryId.toLowerCase().includes(matchedKey) ||
+              (matchedKey === 'hot_coffees' &&
+                (item.categoryId === 'cat_hot_coffees' ||
+                  (item.categoryId.includes('coffee') && !item.categoryId.includes('cold')))) ||
+              (matchedKey === 'teas' && item.categoryId.includes('tea')))
         );
       }
     }
@@ -178,92 +187,181 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
   };
 
   const renderCategoryCard = (cat: Category) => {
-    const items = getItemsForCategory(cat);
+    const rawItems = getItemsForCategory(cat);
 
     if (activeCategoryFilter !== 'all' && activeCategoryFilter !== cat.id) {
       return null;
     }
 
+    const isTeas = isCategoryMatch(cat, 'teas');
+    const isMilkshakes = isCategoryMatch(cat, 'milkshakes');
+    const isPremiumShakes = isCategoryMatch(cat, 'premium_shakes');
+
+    // Exclude Muska Bun from the numbered TEA'S list (rendered in dedicated hero callout)
+    const items = rawItems.filter((i) => {
+      if (isTeas && (i.id.includes('maskabun') || i.name.toLowerCase().includes('maska') || i.name.toLowerCase().includes('muska'))) {
+        return false;
+      }
+      return true;
+    });
+
     return (
       <div
         key={cat.id}
         id={`cat-section-${cat.id}`}
-        className="relative bg-[#130703]/90 border border-[#dfb76c]/40 rounded-xl overflow-hidden shadow-2xl transition-all duration-300 hover:border-[#dfb76c]/80 flex flex-col justify-between"
+        className="relative bg-[#130703]/95 border border-[#dfb76c]/40 rounded-xl overflow-hidden shadow-2xl transition-all duration-300 hover:border-[#dfb76c]/80 flex flex-col justify-between"
       >
         {/* Subtle corner gold brackets */}
-        <div className="absolute top-1 left-1 w-2.5 h-2.5 border-t border-l border-[#dfb76c] pointer-events-none" />
-        <div className="absolute top-1 right-1 w-2.5 h-2.5 border-t border-r border-[#dfb76c] pointer-events-none" />
-        <div className="absolute bottom-1 left-1 w-2.5 h-2.5 border-b border-l border-[#dfb76c] pointer-events-none" />
-        <div className="absolute bottom-1 right-1 w-2.5 h-2.5 border-b border-r border-[#dfb76c] pointer-events-none" />
+        <div className="absolute top-1 left-1 w-2.5 h-2.5 border-t border-l border-[#dfb76c] pointer-events-none z-10" />
+        <div className="absolute top-1 right-1 w-2.5 h-2.5 border-t border-r border-[#dfb76c] pointer-events-none z-10" />
+        <div className="absolute bottom-1 left-1 w-2.5 h-2.5 border-b border-l border-[#dfb76c] pointer-events-none z-10" />
+        <div className="absolute bottom-1 right-1 w-2.5 h-2.5 border-b border-r border-[#dfb76c] pointer-events-none z-10" />
 
-        {/* Category Header Ribbon (Same category-specific colors as the physical menu card) */}
+        {/* Category Header Ribbon with Category Logo (Includes NEW changed Lassi Matka logo) */}
         <div
-          className="relative px-3 py-1.5 flex items-center justify-center border-b border-[#dfb76c]/30 shadow-md"
+          className="relative px-3 py-1.5 flex items-center justify-center gap-2 border-b border-[#dfb76c]/30 shadow-md"
           style={{ backgroundColor: cat.color || '#8C4307' }}
         >
+          <CategoryIcon
+            categoryId={cat.id}
+            size={18}
+            className="text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] flex-shrink-0"
+          />
           <h3 className="font-cinzel text-base md:text-lg font-bold tracking-widest text-[#fff] drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] text-center">
             {cat.name}
           </h3>
         </div>
 
-        {/* Category Product Image if present on card */}
-        {(categoryHeaderImages[cat.id] || cat.image) && !cat.id.includes('teas') && (
-          <div className="px-3 pt-2 pb-1 flex justify-center">
-            <div className="relative w-full max-w-[260px] h-24 sm:h-28 rounded-lg overflow-hidden border border-[#dfb76c]/30 shadow-inner group/img">
-              <img
-                src={categoryHeaderImages[cat.id]?.image || cat.image}
-                alt={cat.name}
-                className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500"
-                loading="lazy"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#130703]/80 via-transparent to-transparent pointer-events-none" />
-            </div>
-          </div>
-        )}
-
-        {/* Item Rows */}
-        <div className="p-3 space-y-1.5 flex-1">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => setSelectedItem(item)}
-              className="group/item flex items-baseline justify-between cursor-pointer py-0.5 px-1 rounded transition-colors hover:bg-[#c59b41]/15"
-              title="Click to view details"
-            >
-              {/* Left: Product Name & NEW badge */}
-              <div className="flex items-baseline gap-1.5 min-w-0 pr-1">
-                {item.isNew && (
-                  <span className="text-[8px] font-black font-outfit uppercase px-1 py-0.2 text-white bg-red-600 rounded-[2px] shadow-sm flex-shrink-0">
-                    NEW
-                  </span>
-                )}
-                <span className="font-outfit font-medium text-[13.5px] sm:text-[14px] leading-tight text-[#fbf6ed] group-hover/item:text-[#dfb76c] transition-colors truncate">
-                  {item.name}
-                </span>
+        {/* Card Main Body */}
+        <div className="p-3 flex-1 flex flex-col justify-between">
+          {/* MILK SHAKES SPECIAL LAYOUT: Tall Strawberry Milkshake Glass on Left + Items on Right */}
+          {isMilkshakes ? (
+            <div className="flex items-start gap-2">
+              {/* Left Column: Tall Strawberry Milkshake Glass with whipped cream & straw */}
+              <div className="flex-shrink-0 pt-1">
+                <MilkshakesTallGlass />
               </div>
 
-              {/* Center: Dotted Leader */}
-              <span className="dotted-leader opacity-35 group-hover/item:opacity-75 transition-opacity" />
+              {/* Right Column: 8 Milkshake Items */}
+              <div className="flex-1 space-y-1 min-w-0">
+                {items.map((item) => {
+                  // Extract leading number and strip dot/dash
+                  const match = item.name.match(/^(\d+)[.\s-]*(.*)$/);
+                  const num = match ? match[1] : '';
+                  const restName = match ? match[2].trim() : item.name;
 
-              {/* Right: Live Updated Price */}
-              <div className="flex items-baseline flex-shrink-0 pl-1">
-                <span
-                  className={`font-cinzel font-bold text-[13.5px] sm:text-[14px] text-[#f4d068] group-hover/item:scale-105 transition-all tracking-tight ${
-                    recentlyUpdatedPriceId === item.id
-                      ? 'text-emerald-400 scale-110 font-black'
-                      : ''
-                  }`}
-                >
-                  {item.price}/-
-                </span>
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedItem(item)}
+                      className="group/item flex items-baseline justify-between cursor-pointer py-0.5 px-1 rounded transition-colors hover:bg-[#c59b41]/15"
+                      title="Click to view item"
+                    >
+                      <div className="flex items-baseline gap-1.5 min-w-0 pr-1">
+                        {num && (
+                          <span className="w-4 h-4 rounded-full bg-[#E06287] text-white text-[10.5px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm leading-none">
+                            {num}
+                          </span>
+                        )}
+                        <span className="font-outfit font-medium text-[13px] sm:text-[13.5px] leading-tight text-[#fbf6ed] group-hover/item:text-[#dfb76c] transition-colors truncate">
+                          {restName}
+                        </span>
+                      </div>
+                      <span className="dotted-leader opacity-35 group-hover/item:opacity-75 transition-opacity" />
+                      <div className="flex items-baseline flex-shrink-0 pl-1">
+                        <span className="font-cinzel font-bold text-[13px] sm:text-[13.5px] text-[#f4d068] tracking-tight">
+                          {item.price}/-
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          ))}
+          ) : (
+            /* STANDARD ITEM LIST FOR ALL OTHER CATEGORIES */
+            <div className="space-y-1.5">
+              {items.map((item) => {
+                // If Premium Shakes, format number in golden circle badge without dot
+                if (isPremiumShakes) {
+                  const match = item.name.match(/^(\d+)[.\s-]*(.*)$/);
+                  const num = match ? match[1] : '';
+                  const restName = match ? match[2].trim() : item.name;
 
-          {/* Special Inset Callout inside TEA'S: "Maska Bun with Chai ♡" */}
-          {isCategoryMatch(cat, 'teas') && (() => {
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedItem(item)}
+                      className="group/item flex items-baseline justify-between cursor-pointer py-0.5 px-1 rounded transition-colors hover:bg-[#c59b41]/15"
+                      title="Click to view item"
+                    >
+                      <div className="flex items-baseline gap-1.5 min-w-0 pr-1">
+                        {num && (
+                          <span className="w-4 h-4 rounded-full bg-[#C79836] text-[#130703] text-[10.5px] font-bold flex items-center justify-center flex-shrink-0 shadow-sm leading-none">
+                            {num}
+                          </span>
+                        )}
+                        <span className="font-outfit font-medium text-[13.5px] sm:text-[14px] leading-tight text-[#fbf6ed] group-hover/item:text-[#dfb76c] transition-colors truncate">
+                          {restName}
+                        </span>
+                      </div>
+                      <span className="dotted-leader opacity-35 group-hover/item:opacity-75 transition-opacity" />
+                      <div className="flex items-baseline flex-shrink-0 pl-1">
+                        <span className="font-cinzel font-bold text-[13.5px] sm:text-[14px] text-[#f4d068] tracking-tight">
+                          {item.price}/-
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Regular Categories: Ensure Ilachi spelling if item_t3
+                let displayName = item.name;
+                if (item.id === 'item_t3' || displayName.toLowerCase().includes('elachi tea')) {
+                  displayName = '3. Ilachi Tea';
+                }
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setSelectedItem(item)}
+                    className="group/item flex items-baseline justify-between cursor-pointer py-0.5 px-1 rounded transition-colors hover:bg-[#c59b41]/15"
+                    title="Click to view item"
+                  >
+                    <div className="flex items-baseline gap-1.5 min-w-0 pr-1">
+                      {item.isNew && (
+                        <span className="text-[8px] font-black font-outfit uppercase px-1 py-0.2 text-white bg-red-600 rounded-[2px] shadow-sm flex-shrink-0">
+                          NEW
+                        </span>
+                      )}
+                      <span className="font-outfit font-medium text-[13.5px] sm:text-[14px] leading-tight text-[#fbf6ed] group-hover/item:text-[#dfb76c] transition-colors truncate">
+                        {displayName}
+                      </span>
+                    </div>
+
+                    <span className="dotted-leader opacity-35 group-hover/item:opacity-75 transition-opacity" />
+
+                    <div className="flex items-baseline flex-shrink-0 pl-1">
+                      <span
+                        className={`font-cinzel font-bold text-[13.5px] sm:text-[14px] text-[#f4d068] group-hover/item:scale-105 transition-all tracking-tight ${
+                          recentlyUpdatedPriceId === item.id
+                            ? 'text-emerald-400 scale-110 font-black'
+                            : ''
+                        }`}
+                      >
+                        {item.price}/-
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Special Inset Callout inside TEA'S: "Muska Bun with Chai ♡" (No description per request) */}
+          {isTeas && (() => {
             const maskaBunItem = liveMenuItems.find((i) =>
-              i.name.toLowerCase().includes('maska bun')
+              i.name.toLowerCase().includes('muska bun') || i.name.toLowerCase().includes('maska bun')
             );
             const maskaPrice = maskaBunItem ? maskaBunItem.price : 50;
 
@@ -271,28 +369,25 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
               <div className="mt-3 pt-2 border-t border-[#dfb76c]/30">
                 <div
                   onClick={() => maskaBunItem && setSelectedItem(maskaBunItem)}
-                  className="bg-[#1c0d06] border border-[#dfb76c]/50 rounded-xl p-2.5 flex items-center justify-between gap-2 shadow-lg cursor-pointer hover:border-[#dfb76c] transition-colors"
+                  className="bg-[#1c0d06] border border-[#dfb76c]/60 rounded-xl p-2 flex items-center justify-between gap-2 shadow-lg cursor-pointer hover:border-[#dfb76c] transition-colors"
                   title="Click to view details"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-[#dfb76c] flex-shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-[#dfb76c] flex-shrink-0">
                       <img
-                        src="https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&w=200&q=80"
-                        alt="Maska Bun with Chai"
+                        src="https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&w=250&q=80"
+                        alt="Muska Bun with Chai"
                         className="w-full h-full object-cover"
                       />
                     </div>
                     <div className="min-w-0">
-                      <span className="font-cormorant italic text-sm sm:text-base font-bold text-[#fce09b] block leading-tight truncate">
-                        Maska Bun with Chai ♡
-                      </span>
-                      <span className="text-[10px] text-[#dfb76c]/80 font-outfit block">
-                        Toasted butter bun with tea
+                      <span className="font-cormorant italic text-base sm:text-lg font-bold text-[#fce09b] block leading-tight">
+                        Muska Bun with Chai ♡
                       </span>
                     </div>
                   </div>
                   <div className="flex-shrink-0">
-                    <span className="font-cinzel font-black text-sm sm:text-base text-white bg-red-600 px-2 py-0.5 rounded shadow">
+                    <span className="font-cinzel font-black text-sm sm:text-base text-white bg-red-600 px-3 py-1 rounded-full shadow-md">
                       {maskaPrice}/-
                     </span>
                   </div>
@@ -301,16 +396,39 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
             );
           })()}
         </div>
+
+        {/* BOTTOM VISUAL SECTION FOR EACH CATEGORY (EXACT MATCH TO PHYSICAL MENU CARD) */}
+        {/* 1. For MILK SHAKES: 6 Mini Milkshakes row at the bottom */}
+        {isMilkshakes && (
+          <div className="px-2 pt-1 pb-2 border-t border-[#dfb76c]/20 bg-[#0e0402]/60">
+            <MilkshakesRowMini />
+          </div>
+        )}
+
+        {/* 2. For Other Categories with Bottom Banner Graphics */}
+        {!isTeas && !isMilkshakes && (categoryFooterImages[cat.id] || cat.image) && (
+          <div className="px-3 pb-2.5 pt-1">
+            <div className="relative w-full h-24 sm:h-28 rounded-lg overflow-hidden border border-[#dfb76c]/40 shadow-inner group/img">
+              <img
+                src={categoryFooterImages[cat.id]?.image || cat.image}
+                alt={categoryFooterImages[cat.id]?.alt || cat.name}
+                className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-500"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#130703]/60 via-transparent to-transparent pointer-events-none" />
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
   return (
     <div className="min-h-screen bg-[#0e0603] text-[#f5efe6] selection:bg-[#c59b41]/30">
-      {/* Top Floating Control Bar - Search button removed as requested */}
+      {/* Top Floating Control Bar */}
       <header className="sticky top-0 z-30 bg-[#140703]/95 backdrop-blur-md border-b border-[#dfb76c]/30 px-3 py-2 sm:px-6 shadow-xl no-print">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          {/* Cafe Identity with Authentic Chai Den Logo replacing CD */}
+          {/* Cafe Identity with Authentic Chai Den Logo */}
           <div className="flex items-center gap-2.5">
             <ChaiDenLogo size="sm" showSubtitle={false} />
             <div>
@@ -367,13 +485,14 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
                   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
               }}
-              className={`px-3 py-1 rounded-full text-xs font-outfit tracking-wide whitespace-nowrap transition-all border ${
+              className={`px-3 py-1 rounded-full text-xs font-outfit tracking-wide whitespace-nowrap transition-all border flex items-center gap-1.5 ${
                 activeCategoryFilter === c.id
                   ? 'bg-[#dfb76c] text-[#1c0e07] font-bold border-[#dfb76c] shadow-[0_0_12px_rgba(223,183,108,0.4)]'
                   : 'bg-[#1e0e07] text-[#dfb76c]/80 border-[#dfb76c]/30 hover:border-[#dfb76c]'
               }`}
             >
-              {c.name}
+              <CategoryIcon categoryId={c.id} size={13} />
+              <span>{c.name}</span>
             </button>
           ))}
         </div>
@@ -392,7 +511,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
           <div className="absolute bottom-3 right-3 w-7 h-7 border-b-2 border-r-2 border-[#dfb76c] pointer-events-none" />
 
           {/* ======================================================== */}
-          {/* 1. TOP HEADER SECTION (EXACT TO PHYSICAL MENU CARD PREVIEW.JPG) */}
+          {/* 1. TOP HEADER SECTION (EXACT TO PHYSICAL MENU CARD)       */}
           {/* ======================================================== */}
           <div className="relative z-10 pt-2 pb-6 border-b border-[#dfb76c]/40">
             <div className="flex flex-col lg:flex-row items-center justify-between gap-6 px-1 sm:px-3">
@@ -401,7 +520,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
                 <ChaiDenLogo size="xl" showSubtitle={true} />
               </div>
 
-              {/* Center Column: Tagline in Cursive Calligraphy (Exact to preview.jpg) */}
+              {/* Center Column: Tagline in Cursive Calligraphy (Exact to menu image) */}
               <div className="flex flex-col items-center justify-center text-center my-1 lg:my-0">
                 <p className="font-cormorant italic text-3xl sm:text-4xl text-[#fde68a] font-semibold leading-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
                   Sip Happiness,
@@ -412,13 +531,13 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
                 </p>
               </div>
 
-              {/* Right Column: Steaming Terracotta Chai Mug with Whole Spices (Exact to preview.jpg) */}
+              {/* Right Column: Steaming Terracotta Chai Mug with Whole Spices */}
               <div className="flex items-center justify-center lg:justify-end flex-shrink-0">
                 <ChaiMugHero size="lg" />
               </div>
             </div>
 
-            {/* Central "MENU" Badge Ribbon (Exact to preview.jpg) */}
+            {/* Central "MENU" Badge Ribbon (Exact to physical card) */}
             <div className="flex justify-center -mb-10 mt-4 relative z-20">
               <div className="bg-[#b3541e] border-2 border-[#f5e29f] px-9 py-1 rounded-md shadow-2xl">
                 <h2 className="font-cinzel text-xl sm:text-2xl font-black tracking-[0.2em] text-[#fff] drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
@@ -540,7 +659,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
         </div>
       </main>
 
-      {/* Item Quick-Detail Modal */}
+      {/* Item Quick-Detail Modal (Description Removed Completely as Requested) */}
       {selectedItem && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200"
@@ -590,11 +709,7 @@ export const PublicMenuCard: React.FC<PublicMenuCardProps> = ({
                 </div>
               </div>
 
-              {selectedItem.description && (
-                <p className="font-cormorant text-base text-[#eadbc8] mt-2 leading-snug">
-                  {selectedItem.description}
-                </p>
-              )}
+              {/* Note: Descriptions removed per user requirement */}
 
               <div className="mt-4 pt-3 border-t border-[#dfb76c]/30 flex justify-between items-center text-xs text-[#dfb76c]/80 font-outfit">
                 <span>The Chai Den Recipe</span>

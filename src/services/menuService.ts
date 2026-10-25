@@ -11,8 +11,8 @@ import { db } from '../firebase';
 import { Category, MenuItem } from '../types';
 import { INITIAL_CATEGORIES, INITIAL_MENU_ITEMS } from '../data/seedData';
 
-const LOCAL_STORAGE_CAT_KEY = 'chaiden_menu_card_exact_v4_cats';
-const LOCAL_STORAGE_ITEMS_KEY = 'chaiden_menu_card_exact_v4_items';
+const LOCAL_STORAGE_CAT_KEY = 'chaiden_menu_card_exact_v5_cats';
+const LOCAL_STORAGE_ITEMS_KEY = 'chaiden_menu_card_exact_v5_items';
 
 // BroadcastChannel for instant cross-tab / cross-window synchronization
 let broadcastChannel: BroadcastChannel | null = null;
@@ -123,6 +123,13 @@ export function saveLocalCategories(cats: Category[], notify = true) {
  * Guarantees all items for COLD COFFEE'S, MILK'S, LASSI'S, FLAVORED MILK'S, COOLER'S & MOJITO'S
  * and TEA'S, SHAKES, etc. are ALWAYS present, while preserving any price changes!
  */
+export const OBSOLETE_ITEM_IDS = new Set<string>();
+
+/**
+ * Intelligent self-healing merge:
+ * Guarantees all items for COLD COFFEE'S, MILK'S, LASSI'S, FLAVORED MILK'S, COOLER'S & MOJITO'S
+ * and TEA'S, SHAKES, etc. are ALWAYS present, while preserving any price changes!
+ */
 export function getLocalItems(): MenuItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_ITEMS_KEY);
@@ -135,11 +142,18 @@ export function getLocalItems(): MenuItem[] {
       mergedMap.set(item.id, { ...item });
     });
 
-    // 2. Overlay stored items (preserves user-edited prices and details)
+    // 2. Overlay stored items (preserves user-edited prices, but eliminates obsolete dummy items)
     storedList.forEach((item) => {
+      if (OBSOLETE_ITEM_IDS.has(item.id)) return;
       if (mergedMap.has(item.id)) {
-        mergedMap.set(item.id, { ...mergedMap.get(item.id)!, ...item });
-      } else {
+        const canonical = mergedMap.get(item.id)!;
+        mergedMap.set(item.id, {
+          ...canonical,
+          price: item.price !== undefined ? item.price : canonical.price,
+          active: item.active !== undefined ? item.active : canonical.active,
+          isNew: item.isNew !== undefined ? item.isNew : canonical.isNew,
+        });
+      } else if (!item.id.startsWith('item_')) {
         mergedMap.set(item.id, item);
       }
     });
@@ -168,7 +182,7 @@ let isSeeding = false;
 
 /**
  * Ensures Firestore has all categories and items.
- * Upserts missing categories and items directly.
+ * Upserts canonical items and deletes obsolete ones.
  */
 export async function seedInitialMenuIfEmpty(): Promise<void> {
   if (isSeeding) return;
@@ -189,24 +203,30 @@ export async function seedInitialMenuIfEmpty(): Promise<void> {
       await batch.commit();
     }
 
-    // 2. Check & upsert items
+    // 2. Check & sync items + purge obsolete ones
     const itemSnapshot = await getDocs(collection(db, 'menuItems'));
     const existingItemIds = new Set<string>();
-    itemSnapshot.forEach((d) => existingItemIds.add(d.id));
+    const deleteBatch = writeBatch(db);
+    let hasDeletes = false;
 
-    const missingItems = INITIAL_MENU_ITEMS.filter((i) => !existingItemIds.has(i.id));
-    if (missingItems.length > 0) {
-      console.log(`Seeding ${missingItems.length} missing menu items to Firestore...`);
-      const chunkSize = 25;
-      for (let i = 0; i < missingItems.length; i += chunkSize) {
-        const chunk = missingItems.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        for (const item of chunk) {
-          batch.set(doc(db, 'menuItems', item.id), item);
-        }
-        await batch.commit();
+    itemSnapshot.forEach((d) => {
+      existingItemIds.add(d.id);
+      if (OBSOLETE_ITEM_IDS.has(d.id)) {
+        deleteBatch.delete(doc(db, 'menuItems', d.id));
+        hasDeletes = true;
       }
+    });
+
+    if (hasDeletes) {
+      await deleteBatch.commit();
     }
+
+    // Upsert any missing canonical items or update names like 3. Ilachi Tea
+    const batch = writeBatch(db);
+    for (const item of INITIAL_MENU_ITEMS) {
+      batch.set(doc(db, 'menuItems', item.id), item, { merge: true });
+    }
+    await batch.commit();
   } catch (error) {
     console.warn('Firestore seeding notice (using self-healing local fallback):', error);
   } finally {
@@ -364,9 +384,19 @@ export function subscribeMenuItems(
           const mergedMap = new Map<string, MenuItem>();
           INITIAL_MENU_ITEMS.forEach((item) => mergedMap.set(item.id, { ...item }));
           remoteList.forEach((item) => {
+            if (OBSOLETE_ITEM_IDS.has(item.id)) {
+              deleteDoc(doc(db, 'menuItems', item.id)).catch(() => {});
+              return;
+            }
             if (mergedMap.has(item.id)) {
-              mergedMap.set(item.id, { ...mergedMap.get(item.id)!, ...item });
-            } else {
+              const canonical = mergedMap.get(item.id)!;
+              mergedMap.set(item.id, {
+                ...canonical,
+                price: item.price !== undefined ? item.price : canonical.price,
+                active: item.active !== undefined ? item.active : canonical.active,
+                isNew: item.isNew !== undefined ? item.isNew : canonical.isNew,
+              });
+            } else if (!item.id.startsWith('item_')) {
               mergedMap.set(item.id, item);
             }
           });

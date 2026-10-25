@@ -19,6 +19,7 @@ export interface UserProfile {
   permissions: RolePermissions;
   active: boolean;
   createdAt: string;
+  updatedAt?: string;
   lastLogin?: string;
   password?: string;
 }

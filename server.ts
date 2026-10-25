@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
@@ -788,7 +788,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 The Chai Den Full-Stack Server running at http://0.0.0.0:${PORT}`);
+    console.log(`\n🚀 The Chai Den Full-Stack Server running at http://localhost:${PORT}/`);
     console.log(`📡 Secure 4-Digit Numeric OTP & Password Reset Endpoints:`);
     console.log(`   - POST /api/auth/generate-otp`);
     console.log(`   - POST /api/auth/verify-otp`);
@@ -797,6 +797,17 @@ async function startServer() {
     console.log(`   - POST /api/auth/resend-reset-otp`);
     console.log(`   - POST /api/auth/reset-password\n`);
   });
+
+  if (PORT !== 3000) {
+    try {
+      const secondaryServer = app.listen(3000, '0.0.0.0', () => {
+        console.log(`🚀 Also accessible at http://localhost:3000/\n`);
+      });
+      secondaryServer.on('error', () => {
+        // Port 3000 busy, 8080 is main
+      });
+    } catch {}
+  }
 }
 
 if (!process.env.VERCEL) {

@@ -155,7 +155,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const primaryOwnerEmail =
     settings.primaryOwnerEmail ||
     usersList.find((u) => u.role === 'OWNER')?.email ||
-    'cherry1011705897@gmail.com';
+    'clnarasimha08@gmail.com';
   const ownerUser =
     usersList.find((u) => u.email.toLowerCase() === primaryOwnerEmail.toLowerCase()) ||
     usersList.find((u) => u.role === 'OWNER');
@@ -1670,7 +1670,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     Active Primary Owner ID (Required in Login)
                   </span>
                   <span className="font-mono text-[#f5efe6] font-semibold text-sm">
-                    {settings.primaryOwnerId || settings.primaryOwnerEmail || 'cherry1011705897@gmail.com'}
+                    {settings.primaryOwnerId || settings.primaryOwnerEmail || 'clnarasimha08@gmail.com'}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl bg-[#200f07] border border-[#dfb76c]/30 text-xs">
@@ -1678,7 +1678,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     Current Registered Owner Gmail
                   </span>
                   <span className="font-mono text-[#f5efe6] font-semibold text-sm">
-                    {settings.primaryOwnerEmail || 'cherry1011705897@gmail.com'}
+                    {settings.primaryOwnerEmail || 'clnarasimha08@gmail.com'}
                   </span>
                 </div>
               </div>
